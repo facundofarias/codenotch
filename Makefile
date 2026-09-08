@@ -209,3 +209,57 @@ verify-release:
 	codesign --verify --deep --strict --verbose=2 $(RELEASE_DIR)/mnt/$(APP_NAME).app
 	spctl --assess --type execute --verbose=4 $(RELEASE_DIR)/mnt/$(APP_NAME).app
 	hdiutil detach $(RELEASE_DIR)/mnt
+
+# --- Unsigned builds -----------------------------------------------------------
+# Everything above needs the maintainer's Developer ID certificate and the
+# stored notarization credentials, so it can only ever run on one machine. This
+# produces the same Release-configuration app from a GitHub runner or a fork,
+# ad-hoc signed, so that trying a build no longer means installing Xcode and
+# compiling it — `make dmg-ci`, or the Package workflow's artifact.
+#
+# Ad-hoc rather than unsigned: an arm64 binary carrying no signature at all will
+# not execute, and the bundle needs one coherent signature across the app and
+# the Sparkle framework inside it or Gatekeeper rejects the whole thing before
+# it ever offers an "Open Anyway".
+#
+# Why this is not how releases ship, and what someone running one gives up: the
+# ad-hoc identity is regenerated on every build, so the download is not
+# notarized (macOS quarantines it until the user clears it by hand) and the
+# login keychain's ACL cannot recognise the same app twice — the Claude Code
+# token prompt comes back after every single update, which is exactly what
+# project.yml's stable identity exists to prevent.
+CI_DIR     := build/ci
+CI_DERIVED := $(CI_DIR)/DerivedData
+CI_APP     := $(CI_DERIVED)/Build/Products/Release/$(APP_NAME).app
+CI_DMG     := $(CI_DIR)/$(APP_NAME)-$(VERSION)-unsigned.dmg
+
+.PHONY: build-ci dmg-ci
+
+# `build`, not `archive` + `-exportArchive`: exporting reads ExportOptions.plist
+# and re-signs for distribution, which needs the Developer ID identity that is
+# the one thing a runner does not have.
+build-ci: gen
+	rm -rf $(CI_DIR)
+	mkdir -p $(CI_DIR)
+	@# Same reason as `archive`: without this, every build leaves spare
+	@# "Codenotch" entries in Spotlight next to the installed app.
+	@touch build/.metadata_never_index
+	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
+		-configuration Release -derivedDataPath $(CI_DERIVED) \
+		CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="" \
+		CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+		build
+
+# A disk image for the same reason releases ship one, plus one specific to CI:
+# GitHub's artifact upload zips whatever it is given and drops symlinks and the
+# executable bit on the way, which takes an .app bundle apart — the framework
+# inside it is symlinks. A dmg arrives as a single opaque file instead.
+dmg-ci: build-ci
+	rm -rf $(CI_DIR)/stage
+	mkdir -p $(CI_DIR)/stage
+	cp -R $(CI_APP) $(CI_DIR)/stage/
+	ln -s /Applications $(CI_DIR)/stage/Applications
+	hdiutil create -volname "$(APP_NAME)" -srcfolder $(CI_DIR)/stage \
+		-ov -format UDZO $(CI_DMG)
+	rm -rf $(CI_DIR)/stage
+	@echo "Unsigned disk image: $(CI_DMG)"
