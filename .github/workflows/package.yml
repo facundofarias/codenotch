@@ -19,7 +19,7 @@ jobs:
     # becomes the problem.
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Show toolchain
         run: |
@@ -44,7 +44,7 @@ jobs:
 
       # The commit, not just the version, because every push to a branch
       # produces one of these and the version only changes at a release.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Codenotch-${{ steps.version.outputs.value }}-${{ github.sha }}
           path: build/ci/*.dmg
