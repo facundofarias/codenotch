@@ -69,5 +69,5 @@ jobs:
             echo "xattr -dr com.apple.quarantine /Applications/Codenotch.app"
             echo '```'
             echo
-            echo "Apple Silicon only. Requires macOS 26 or later."
+            echo "Universal binary — Apple Silicon and Intel. Requires macOS 26 or later."
           } >> "$GITHUB_STEP_SUMMARY"
