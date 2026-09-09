@@ -232,6 +232,9 @@ CI_DIR     := build/ci
 CI_DERIVED := $(CI_DIR)/DerivedData
 CI_APP     := $(CI_DERIVED)/Build/Products/Release/$(APP_NAME).app
 CI_DMG     := $(CI_DIR)/$(APP_NAME)-$(VERSION)-unsigned.dmg
+# Absolute: xcodebuild resolves CODE_SIGN_ENTITLEMENTS against the project
+# directory, not the working directory.
+CI_ENTITLEMENTS := $(CURDIR)/$(CI_DIR)/adhoc.entitlements
 
 .PHONY: build-ci dmg-ci
 
@@ -244,10 +247,35 @@ build-ci: gen
 	@# Same reason as `archive`: without this, every build leaves spare
 	@# "Codenotch" entries in Spotlight next to the installed app.
 	@touch build/.metadata_never_index
+	@# The one entitlement an ad-hoc build cannot do without. The hardened
+	@# runtime turns on library validation, which will only load a library
+	@# whose Team ID matches the process's — and an ad-hoc signature carries
+	@# no Team ID at all, so the app and the Sparkle framework beside it can
+	@# never be shown to match. The build looks fine and `codesign --verify
+	@# --deep --strict` passes, because each signature *is* valid; it is dyld
+	@# that refuses, and only at launch:
+	@#
+	@#   Library not loaded: @rpath/Sparkle.framework/Versions/B/Sparkle
+	@#   ... not valid for use in process: mapping process and mapped file
+	@#   (non-platform) have different Team IDs
+	@#
+	@# which macOS reports to the user as "Codenotch cannot be opened because
+	@# of a problem". A Developer ID build has no such trouble: one identity
+	@# signs the app and re-signs the framework, so the Team IDs do match, and
+	@# this is the single difference that has to be relaxed to make up for not
+	@# holding that identity. The hardened runtime otherwise stays on, so a
+	@# preview behaves like the release it previews.
+	printf '%s\n' \
+		'<?xml version="1.0" encoding="UTF-8"?>' \
+		'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+		'<plist version="1.0"><dict>' \
+		'<key>com.apple.security.cs.disable-library-validation</key><true/>' \
+		'</dict></plist>' > $(CI_ENTITLEMENTS)
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -destination '$(DEST)' \
 		-configuration Release -derivedDataPath $(CI_DERIVED) \
 		CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="" \
 		CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+		CODE_SIGN_ENTITLEMENTS="$(CI_ENTITLEMENTS)" \
 		build
 
 # A disk image for the same reason releases ship one, plus one specific to CI:
